@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://c3frxlqb0seof"]
+
+[ext_resource type="Script" uid="uid://d2tw70nd72b88" path="res://abismo.gd" id="1_733vi"]
+
+[node name="Abismo" type="Node2D" unique_id=1766564453]
+script = ExtResource("1_733vi")
