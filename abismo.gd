@@ -5,48 +5,96 @@ const FILAS := 12
 const COLOR_FONDO := Color("06121f")
 const COLOR_LINEA := Color("1e4a66")
 const COLOR_PARED := Color("2a4a5e")
+const COLOR_PARED_GRIS := Color("1a2e3a")   # pared ya vista pero fuera de la luz
 const COLOR_BUZO := Color("f2c14e")
 const COLOR_ENEMIGO := Color("c1382d")
 const COLOR_TOQUE := Color("4ecdc4")
 const COLOR_PIP_LLENO := Color("4ecdc4")
 const COLOR_PIP_VACIO := Color("1e4a66")
-const COLOR_NIEBLA := Color(0, 0, 0, 0.92)  # negro casi opaco sobre el fondo
+const COLOR_NIEBLA := Color(0, 0, 0, 0.92)
+const COLOR_GRIS := Color(0, 0, 0, 0.70)    # negro más transparente: "recuerdo" de celda vista
 
 const PUNTOS_ACCION_MAX := 4
 const VIDA_MAX_BUZO := 3
 const VIDA_MAX_ENEMIGO := 2
 const DANO_ATAQUE := 1
 const COSTE_ATAQUE := 1
-const ALCANCE_ATAQUE := 1  # Chebyshev: solo celda adyacente, diagonal incluida
+const ALCANCE_ATAQUE := 1
+const RADIO_LUZ := 3
 
-const RADIO_LUZ := 3  # celdas que ilumina el buzo a su alrededor (Chebyshev)
-
-# Mapa de paredes: cada Vector2i es una celda bloqueada.
 const PAREDES := [
 	Vector2i(2, 2), Vector2i(3, 2), Vector2i(4, 2),
 	Vector2i(2, 3),
 	Vector2i(2, 4),
 ]
 
+# Memoria de celdas que el buzo ha iluminado alguna vez.
+# Clave: Vector2i de la celda. Valor: true (solo nos importa si está o no).
+var celdas_vistas := {}
+
 func _es_pared(celda: Vector2i) -> bool:
 	return celda in PAREDES
 
-# Devuelve true si la celda está dentro del radio de luz del buzo (sin comprobar paredes aún)
+# Trazado de rayo (Bresenham) desde el buzo hasta 'destino'.
+# Devuelve true si NO hay ninguna pared en el camino (la celda está iluminada).
+# Devuelve false si alguna celda de pared interrumpe la línea antes de llegar.
+func _tiene_vision(destino: Vector2i) -> bool:
+	var x0 := celda_buzo.x
+	var y0 := celda_buzo.y
+	var x1 := destino.x
+	var y1 := destino.y
+
+	var dx := absi(x1 - x0)
+	var dy := absi(y1 - y0)
+	var sx := 1 if x0 < x1 else -1
+	var sy := 1 if y0 < y1 else -1
+	var err := dx - dy
+
+	while true:
+		# Si llegamos al destino, no hubo pared en medio: hay visión
+		if x0 == x1 and y0 == y1:
+			return true
+		# Si la celda actual (que NO es el buzo ni el destino) es pared, bloquea
+		var actual := Vector2i(x0, y0)
+		if actual != celda_buzo and _es_pared(actual):
+			return false
+		var e2 := 2 * err
+		if e2 > -dy:
+			err -= dy
+			x0 += sx
+		if e2 < dx:
+			err += dx
+			y0 += sy
+
+	return true  # nunca se llega aquí, pero GDScript lo exige
+
+# Una celda está iluminada si está dentro del radio Y el buzo tiene visión hasta ella
 func _esta_iluminada(celda: Vector2i) -> bool:
-	return _distancia_celdas(celda, celda_buzo) <= RADIO_LUZ
+	if _distancia_celdas(celda, celda_buzo) > RADIO_LUZ:
+		return false
+	return _tiene_vision(celda)
+
+# Actualiza el diccionario de celdas vistas con las que están iluminadas ahora
+func _actualizar_memoria() -> void:
+	for f in FILAS:
+		for c in COLUMNAS:
+			var celda := Vector2i(c, f)
+			if _esta_iluminada(celda):
+				celdas_vistas[celda] = true
 
 var celda_buzo := Vector2i(1, 9)
 var vida_buzo := VIDA_MAX_BUZO
-
 var celda_enemigo := Vector2i(5, 6)
 var vida_enemigo := VIDA_MAX_ENEMIGO
 var enemigo_vivo := true
-
 var puntos_accion := PUNTOS_ACCION_MAX
 var celda_tocada := Vector2i(-1, -1)
-
 var lado := 0.0
 var origen := Vector2.ZERO
+
+func _ready() -> void:
+	# Poblamos la memoria con la posición inicial del buzo
+	_actualizar_memoria()
 
 func _calcular_geometria() -> void:
 	var pantalla := get_viewport_rect().size
@@ -111,6 +159,7 @@ func _input(event: InputEvent) -> void:
 
 			if celda == celda_buzo:
 				_turno_enemigo()
+				_actualizar_memoria()
 			elif enemigo_vivo and celda == celda_enemigo:
 				var distancia := _distancia_celdas(celda_buzo, celda)
 				if distancia <= ALCANCE_ATAQUE and puntos_accion >= COSTE_ATAQUE:
@@ -120,11 +169,13 @@ func _input(event: InputEvent) -> void:
 						enemigo_vivo = false
 					if puntos_accion <= 0:
 						_turno_enemigo()
+						_actualizar_memoria()
 			elif not _es_pared(celda):
 				var distancia := _distancia_celdas(celda_buzo, celda)
 				if distancia > 0 and distancia <= puntos_accion:
 					celda_buzo = celda
 					puntos_accion -= distancia
+					_actualizar_memoria()
 					if puntos_accion <= 0:
 						_turno_enemigo()
 
@@ -133,15 +184,9 @@ func _input(event: InputEvent) -> void:
 func _draw() -> void:
 	_calcular_geometria()
 
-	# Fondo
 	draw_rect(Rect2(Vector2.ZERO, get_viewport_rect().size), COLOR_FONDO)
 
-	# Paredes (siempre visibles en este paso; en paso 3 pasarán a gris fuera de la luz)
-	for pared in PAREDES:
-		var esquina_p := origen + Vector2(pared) * lado
-		draw_rect(Rect2(esquina_p, Vector2(lado, lado)), COLOR_PARED)
-
-	# Rejilla
+	# Rejilla completa (siempre, debajo de todo)
 	for c in COLUMNAS + 1:
 		var x := origen.x + c * lado
 		draw_line(Vector2(x, origen.y), Vector2(x, origen.y + lado * FILAS), COLOR_LINEA, 2.0)
@@ -154,7 +199,7 @@ func _draw() -> void:
 		var esquina := origen + Vector2(celda_tocada) * lado
 		draw_rect(Rect2(esquina, Vector2(lado, lado)), COLOR_TOQUE, false, 3.0)
 
-	# Enemigo: solo se dibuja si está iluminado
+	# Enemigo: solo si está iluminado
 	if enemigo_vivo and _esta_iluminada(celda_enemigo):
 		var centro_e := origen + (Vector2(celda_enemigo) + Vector2(0.5, 0.5)) * lado
 		var r := lado * 0.32
@@ -170,16 +215,31 @@ func _draw() -> void:
 	var centro := origen + (Vector2(celda_buzo) + Vector2(0.5, 0.5)) * lado
 	draw_circle(centro, lado * 0.35, COLOR_BUZO)
 
-	# Niebla: pintamos negro encima de cada celda que NO está iluminada
-	# Las paredes también quedan tapadas por la niebla fuera del radio (eso cambia en paso 3)
+	# Niebla por capas:
+	# - Celda iluminada: se ve normal (no pintamos nada encima)
+	# - Celda vista antes pero ahora en sombra: gris semitransparente
+	#   - Si es pared: color de pared gris
+	#   - Si no: negro semitransparente (COLOR_GRIS)
+	# - Celda nunca vista: negro casi opaco (COLOR_NIEBLA)
 	for f in FILAS:
 		for c in COLUMNAS:
 			var celda := Vector2i(c, f)
-			if not _esta_iluminada(celda):
-				var esquina_n := origen + Vector2(celda) * lado
+			var esquina_n := origen + Vector2(celda) * lado
+			if _esta_iluminada(celda):
+				# Iluminada: dibujamos la pared si la hay, nada más
+				if _es_pared(celda):
+					draw_rect(Rect2(esquina_n, Vector2(lado, lado)), COLOR_PARED)
+			elif celda in celdas_vistas:
+				# Vista antes: gris
+				if _es_pared(celda):
+					draw_rect(Rect2(esquina_n, Vector2(lado, lado)), COLOR_PARED_GRIS)
+				else:
+					draw_rect(Rect2(esquina_n, Vector2(lado, lado)), COLOR_GRIS)
+			else:
+				# Nunca vista: negro total
 				draw_rect(Rect2(esquina_n, Vector2(lado, lado)), COLOR_NIEBLA)
 
-	# HUD (siempre visible, se dibuja al final para que quede encima de la niebla)
+	# HUD encima de todo
 	var radio_pip := lado * 0.12
 	for i in PUNTOS_ACCION_MAX:
 		var c_pip := origen + Vector2(radio_pip * 3.0 * i + radio_pip * 2.0, radio_pip * 2.0)
