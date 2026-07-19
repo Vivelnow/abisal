@@ -21,6 +21,9 @@ const DANO_ATAQUE := 1
 const COSTE_ATAQUE := 1
 const ALCANCE_ATAQUE := 1
 const RADIO_LUZ := 3
+const OXIGENO_MAX := 12
+const COLOR_OXIGENO_LLENO := Color("2a9df4")
+const COLOR_OXIGENO_BAJO  := Color("e63946")
 
 const PAREDES := [
 	Vector2i(2, 2), Vector2i(3, 2), Vector2i(4, 2),
@@ -88,6 +91,7 @@ var celda_enemigo := Vector2i(5, 6)
 var vida_enemigo := VIDA_MAX_ENEMIGO
 var enemigo_vivo := true
 var puntos_accion := PUNTOS_ACCION_MAX
+var oxigeno := OXIGENO_MAX
 var celda_tocada := Vector2i(-1, -1)
 var lado := 0.0
 var origen := Vector2.ZERO
@@ -175,6 +179,7 @@ func _input(event: InputEvent) -> void:
 				if distancia > 0 and distancia <= puntos_accion:
 					celda_buzo = celda
 					puntos_accion -= distancia
+					oxigeno = maxi(oxigeno - distancia, 0)
 					_actualizar_memoria()
 					if puntos_accion <= 0:
 						_turno_enemigo()
@@ -251,3 +256,18 @@ func _draw() -> void:
 		for i in VIDA_MAX_ENEMIGO:
 			var c_ve := origen + Vector2(lado * COLUMNAS - radio_pip * 3.0 * i - radio_pip * 2.0, radio_pip * 2.0)
 			draw_circle(c_ve, radio_pip, COLOR_ENEMIGO if i < vida_enemigo else COLOR_LINEA)
+			# Barra de oxígeno: vertical, a la derecha del buzo
+	var barra_ancho  := lado * 0.14
+	var barra_alto   := lado * 0.80
+	var barra_x      := centro.x + lado * 0.42
+	var barra_y      := centro.y - barra_alto / 2.0
+	# Fondo de la barra (vacío)
+	draw_rect(Rect2(Vector2(barra_x, barra_y), Vector2(barra_ancho, barra_alto)), COLOR_PIP_VACIO)
+	# Relleno proporcional al oxígeno que queda
+	var fraccion     := float(oxigeno) / float(OXIGENO_MAX)
+	var relleno_alto := barra_alto * fraccion
+	var color_o2     := COLOR_OXIGENO_BAJO if fraccion <= 0.25 else COLOR_OXIGENO_LLENO
+	draw_rect(
+		Rect2(Vector2(barra_x, barra_y + barra_alto - relleno_alto), Vector2(barra_ancho, relleno_alto)),
+		color_o2
+	)
