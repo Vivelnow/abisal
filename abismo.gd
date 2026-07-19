@@ -10,6 +10,7 @@ const COLOR_ENEMIGO := Color("c1382d")
 const COLOR_TOQUE := Color("4ecdc4")
 const COLOR_PIP_LLENO := Color("4ecdc4")
 const COLOR_PIP_VACIO := Color("1e4a66")
+const COLOR_NIEBLA := Color(0, 0, 0, 0.92)  # negro casi opaco sobre el fondo
 
 const PUNTOS_ACCION_MAX := 4
 const VIDA_MAX_BUZO := 3
@@ -18,8 +19,9 @@ const DANO_ATAQUE := 1
 const COSTE_ATAQUE := 1
 const ALCANCE_ATAQUE := 1  # Chebyshev: solo celda adyacente, diagonal incluida
 
+const RADIO_LUZ := 3  # celdas que ilumina el buzo a su alrededor (Chebyshev)
+
 # Mapa de paredes: cada Vector2i es una celda bloqueada.
-# Forma una L: pasillo horizontal (fila 2, columnas 2-4) + pasillo vertical (columnas 2, filas 2-4).
 const PAREDES := [
 	Vector2i(2, 2), Vector2i(3, 2), Vector2i(4, 2),
 	Vector2i(2, 3),
@@ -29,22 +31,20 @@ const PAREDES := [
 func _es_pared(celda: Vector2i) -> bool:
 	return celda in PAREDES
 
-# Celda donde está el buzo: columna 1, fila 9 (se cuenta desde 0)
+# Devuelve true si la celda está dentro del radio de luz del buzo (sin comprobar paredes aún)
+func _esta_iluminada(celda: Vector2i) -> bool:
+	return _distancia_celdas(celda, celda_buzo) <= RADIO_LUZ
+
 var celda_buzo := Vector2i(1, 9)
 var vida_buzo := VIDA_MAX_BUZO
 
-# Enemigo de prueba. Posición fija solo para verificar la mecánica, no es diseño de misión.
 var celda_enemigo := Vector2i(5, 6)
 var vida_enemigo := VIDA_MAX_ENEMIGO
 var enemigo_vivo := true
 
-# Puntos de acción restantes. Se rellenan al empezar cada turno del buzo.
 var puntos_accion := PUNTOS_ACCION_MAX
-
-# Última celda tocada válida (dentro de la cuadrícula, alcanzable o no). -1,-1 = ninguna todavía.
 var celda_tocada := Vector2i(-1, -1)
 
-# Geometría de la cuadrícula (se rellenan en _calcular_geometria)
 var lado := 0.0
 var origen := Vector2.ZERO
 
@@ -56,7 +56,6 @@ func _calcular_geometria() -> void:
 		(pantalla.y - lado * FILAS) / 2.0
 	)
 
-# Inversa de _calcular_geometria: de posición en píxeles a coordenada de celda
 func _posicion_a_celda(pos: Vector2) -> Vector2i:
 	return Vector2i(
 		floori((pos.x - origen.x) / lado),
@@ -66,12 +65,9 @@ func _posicion_a_celda(pos: Vector2) -> Vector2i:
 func _celda_valida(celda: Vector2i) -> bool:
 	return celda.x >= 0 and celda.x < COLUMNAS and celda.y >= 0 and celda.y < FILAS
 
-# Distancia Chebyshev: la diagonal cuenta igual que un paso recto
 func _distancia_celdas(a: Vector2i, b: Vector2i) -> int:
 	return maxi(absi(a.x - b.x), absi(a.y - b.y))
 
-# Un paso de origen hacia destino, un eje a la vez. Sin rodeos: es la IA mínima, no pathfinding.
-# Ahora comprueba que el destino no sea pared: si lo es, no se mueve.
 func _paso_hacia(origen_celda: Vector2i, destino: Vector2i) -> Vector2i:
 	var dx := 0
 	var dy := 0
@@ -85,10 +81,9 @@ func _paso_hacia(origen_celda: Vector2i, destino: Vector2i) -> Vector2i:
 		dy = -1
 	var siguiente := origen_celda + Vector2i(dx, dy)
 	if _es_pared(siguiente):
-		return origen_celda  # bloqueado: se queda donde está
+		return origen_celda
 	return siguiente
 
-# El turno del enemigo: si está pegado, ataca; si no, se acerca un paso. Luego vuelve a tocarte a ti.
 func _turno_enemigo() -> void:
 	if enemigo_vivo:
 		var distancia := _distancia_celdas(celda_enemigo, celda_buzo)
@@ -115,7 +110,6 @@ func _input(event: InputEvent) -> void:
 			celda_tocada = celda
 
 			if celda == celda_buzo:
-				# Tocar tu propia celda termina el turno aunque te queden puntos
 				_turno_enemigo()
 			elif enemigo_vivo and celda == celda_enemigo:
 				var distancia := _distancia_celdas(celda_buzo, celda)
@@ -127,7 +121,6 @@ func _input(event: InputEvent) -> void:
 					if puntos_accion <= 0:
 						_turno_enemigo()
 			elif not _es_pared(celda):
-				# Solo se mueve si la celda destino NO es pared
 				var distancia := _distancia_celdas(celda_buzo, celda)
 				if distancia > 0 and distancia <= puntos_accion:
 					celda_buzo = celda
@@ -136,33 +129,33 @@ func _input(event: InputEvent) -> void:
 						_turno_enemigo()
 
 			queue_redraw()
-		# fuera de la cuadrícula: se ignora
 
 func _draw() -> void:
 	_calcular_geometria()
 
+	# Fondo
 	draw_rect(Rect2(Vector2.ZERO, get_viewport_rect().size), COLOR_FONDO)
 
-	# Primero rellenamos las celdas de pared con su color, luego dibujamos la rejilla encima
+	# Paredes (siempre visibles en este paso; en paso 3 pasarán a gris fuera de la luz)
 	for pared in PAREDES:
 		var esquina_p := origen + Vector2(pared) * lado
 		draw_rect(Rect2(esquina_p, Vector2(lado, lado)), COLOR_PARED)
 
+	# Rejilla
 	for c in COLUMNAS + 1:
 		var x := origen.x + c * lado
 		draw_line(Vector2(x, origen.y), Vector2(x, origen.y + lado * FILAS), COLOR_LINEA, 2.0)
-
 	for f in FILAS + 1:
 		var y := origen.y + f * lado
 		draw_line(Vector2(origen.x, y), Vector2(origen.x + lado * COLUMNAS, y), COLOR_LINEA, 2.0)
 
-	# Marca de toque: dónde tocaste, aunque no haya movido ni atacado
+	# Marca de toque
 	if _celda_valida(celda_tocada):
 		var esquina := origen + Vector2(celda_tocada) * lado
 		draw_rect(Rect2(esquina, Vector2(lado, lado)), COLOR_TOQUE, false, 3.0)
 
-	# El enemigo: un rombo, para distinguirlo del buzo a simple vista
-	if enemigo_vivo:
+	# Enemigo: solo se dibuja si está iluminado
+	if enemigo_vivo and _esta_iluminada(celda_enemigo):
 		var centro_e := origen + (Vector2(celda_enemigo) + Vector2(0.5, 0.5)) * lado
 		var r := lado * 0.32
 		var puntos_rombo := PackedVector2Array([
@@ -173,11 +166,20 @@ func _draw() -> void:
 		])
 		draw_colored_polygon(puntos_rombo, COLOR_ENEMIGO)
 
-	# El buzo: un círculo en el centro de su celda
+	# Buzo
 	var centro := origen + (Vector2(celda_buzo) + Vector2(0.5, 0.5)) * lado
 	draw_circle(centro, lado * 0.35, COLOR_BUZO)
 
-	# HUD esquina superior izquierda: puntos de acción (fila 1) y vida del buzo (fila 2)
+	# Niebla: pintamos negro encima de cada celda que NO está iluminada
+	# Las paredes también quedan tapadas por la niebla fuera del radio (eso cambia en paso 3)
+	for f in FILAS:
+		for c in COLUMNAS:
+			var celda := Vector2i(c, f)
+			if not _esta_iluminada(celda):
+				var esquina_n := origen + Vector2(celda) * lado
+				draw_rect(Rect2(esquina_n, Vector2(lado, lado)), COLOR_NIEBLA)
+
+	# HUD (siempre visible, se dibuja al final para que quede encima de la niebla)
 	var radio_pip := lado * 0.12
 	for i in PUNTOS_ACCION_MAX:
 		var c_pip := origen + Vector2(radio_pip * 3.0 * i + radio_pip * 2.0, radio_pip * 2.0)
@@ -185,8 +187,6 @@ func _draw() -> void:
 	for i in VIDA_MAX_BUZO:
 		var c_vida := origen + Vector2(radio_pip * 3.0 * i + radio_pip * 2.0, radio_pip * 5.0)
 		draw_circle(c_vida, radio_pip, COLOR_BUZO if i < vida_buzo else COLOR_LINEA)
-
-	# HUD esquina superior derecha: vida del enemigo, mientras esté vivo
 	if enemigo_vivo:
 		for i in VIDA_MAX_ENEMIGO:
 			var c_ve := origen + Vector2(lado * COLUMNAS - radio_pip * 3.0 * i - radio_pip * 2.0, radio_pip * 2.0)
