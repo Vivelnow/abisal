@@ -4,6 +4,7 @@ const COLUMNAS := 8
 const FILAS := 12
 const COLOR_FONDO := Color("06121f")
 const COLOR_LINEA := Color("1e4a66")
+const COLOR_PARED := Color("2a4a5e")
 const COLOR_BUZO := Color("f2c14e")
 const COLOR_ENEMIGO := Color("c1382d")
 const COLOR_TOQUE := Color("4ecdc4")
@@ -17,12 +18,23 @@ const DANO_ATAQUE := 1
 const COSTE_ATAQUE := 1
 const ALCANCE_ATAQUE := 1  # Chebyshev: solo celda adyacente, diagonal incluida
 
-# Celda donde está el buzo: columna 3, fila 9 (se cuenta desde 0)
-var celda_buzo := Vector2i(3, 9)
-var vida_buzo := VIDA_MAX_BUZO  # ahora sí puede bajar: el enemigo ataca en su turno
+# Mapa de paredes: cada Vector2i es una celda bloqueada.
+# Forma una L: pasillo horizontal (fila 2, columnas 2-4) + pasillo vertical (columnas 2, filas 2-4).
+const PAREDES := [
+	Vector2i(2, 2), Vector2i(3, 2), Vector2i(4, 2),
+	Vector2i(2, 3),
+	Vector2i(2, 4),
+]
+
+func _es_pared(celda: Vector2i) -> bool:
+	return celda in PAREDES
+
+# Celda donde está el buzo: columna 1, fila 9 (se cuenta desde 0)
+var celda_buzo := Vector2i(1, 9)
+var vida_buzo := VIDA_MAX_BUZO
 
 # Enemigo de prueba. Posición fija solo para verificar la mecánica, no es diseño de misión.
-var celda_enemigo := Vector2i(5, 7)
+var celda_enemigo := Vector2i(5, 6)
 var vida_enemigo := VIDA_MAX_ENEMIGO
 var enemigo_vivo := true
 
@@ -59,6 +71,7 @@ func _distancia_celdas(a: Vector2i, b: Vector2i) -> int:
 	return maxi(absi(a.x - b.x), absi(a.y - b.y))
 
 # Un paso de origen hacia destino, un eje a la vez. Sin rodeos: es la IA mínima, no pathfinding.
+# Ahora comprueba que el destino no sea pared: si lo es, no se mueve.
 func _paso_hacia(origen_celda: Vector2i, destino: Vector2i) -> Vector2i:
 	var dx := 0
 	var dy := 0
@@ -70,7 +83,10 @@ func _paso_hacia(origen_celda: Vector2i, destino: Vector2i) -> Vector2i:
 		dy = 1
 	elif destino.y < origen_celda.y:
 		dy = -1
-	return origen_celda + Vector2i(dx, dy)
+	var siguiente := origen_celda + Vector2i(dx, dy)
+	if _es_pared(siguiente):
+		return origen_celda  # bloqueado: se queda donde está
+	return siguiente
 
 # El turno del enemigo: si está pegado, ataca; si no, se acerca un paso. Luego vuelve a tocarte a ti.
 func _turno_enemigo() -> void:
@@ -90,7 +106,7 @@ func _input(event: InputEvent) -> void:
 		pos = event.position
 		hay_toque = true
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		pos = event.position  # en el portátil, el clic cuenta como toque
+		pos = event.position
 		hay_toque = true
 
 	if hay_toque:
@@ -110,7 +126,8 @@ func _input(event: InputEvent) -> void:
 						enemigo_vivo = false
 					if puntos_accion <= 0:
 						_turno_enemigo()
-			else:
+			elif not _es_pared(celda):
+				# Solo se mueve si la celda destino NO es pared
 				var distancia := _distancia_celdas(celda_buzo, celda)
 				if distancia > 0 and distancia <= puntos_accion:
 					celda_buzo = celda
@@ -119,12 +136,17 @@ func _input(event: InputEvent) -> void:
 						_turno_enemigo()
 
 			queue_redraw()
-		# fuera de la cuadrícula: se ignora, celda_tocada no cambia
+		# fuera de la cuadrícula: se ignora
 
 func _draw() -> void:
 	_calcular_geometria()
 
 	draw_rect(Rect2(Vector2.ZERO, get_viewport_rect().size), COLOR_FONDO)
+
+	# Primero rellenamos las celdas de pared con su color, luego dibujamos la rejilla encima
+	for pared in PAREDES:
+		var esquina_p := origen + Vector2(pared) * lado
+		draw_rect(Rect2(esquina_p, Vector2(lado, lado)), COLOR_PARED)
 
 	for c in COLUMNAS + 1:
 		var x := origen.x + c * lado
