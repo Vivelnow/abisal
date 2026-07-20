@@ -14,6 +14,7 @@ const COLOR_PIP_LLENO := Color("4ecdc4")
 const COLOR_PIP_VACIO := Color("1e4a66")
 const COLOR_NIEBLA := Color(0, 0, 0, 0.92)
 const COLOR_GRIS := Color(0, 0, 0, 0.70)
+const COLOR_TEXTO := Color("ffffff")
 
 const PUNTOS_ACCION_MAX := 4
 const VIDA_MAX_BUZO := 3
@@ -32,6 +33,7 @@ const PAREDES := [
 	Vector2i(2, 4),
 ]
 
+# --- BUZOS ---
 var celdas_buzos := [
 	Vector2i(1, 9),
 	Vector2i(2, 9),
@@ -46,15 +48,51 @@ var buzo_activo := 0
 
 var celdas_vistas := [{}, {}, {}, {}]
 
-var celda_enemigo := Vector2i(5, 3)
-var vida_enemigo := VIDA_MAX_ENEMIGO
-var enemigo_vivo := true
+# --- ENEMIGOS: ahora son 4, igual que los buzos ---
+var celdas_enemigos := [
+	Vector2i(5, 1),
+	Vector2i(6, 1),
+	Vector2i(5, 2),
+	Vector2i(6, 2),
+]
+var vidas_enemigos := [VIDA_MAX_ENEMIGO, VIDA_MAX_ENEMIGO, VIDA_MAX_ENEMIGO, VIDA_MAX_ENEMIGO]
+var enemigos_vivos := [true, true, true, true]
+
+# --- ESTADO DE PARTIDA ---
+# "jugando", "victoria", "derrota"
+var estado := "jugando"
 
 var celda_tocada := Vector2i(-1, -1)
 var lado := 0.0
 var origen := Vector2.ZERO
 
 func _ready() -> void:
+	for i in 4:
+		_actualizar_memoria(i)
+
+func _reiniciar() -> void:
+	celdas_buzos = [
+		Vector2i(1, 9),
+		Vector2i(2, 9),
+		Vector2i(1, 10),
+		Vector2i(2, 10),
+	]
+	vidas_buzos = [VIDA_MAX_BUZO, VIDA_MAX_BUZO, VIDA_MAX_BUZO, VIDA_MAX_BUZO]
+	puntos_buzos = [PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX]
+	oxigenos_buzos = [OXIGENO_MAX, OXIGENO_MAX, OXIGENO_MAX, OXIGENO_MAX]
+	buzos_vivos = [true, true, true, true]
+	buzo_activo = 0
+	celdas_vistas = [{}, {}, {}, {}]
+	celdas_enemigos = [
+		Vector2i(5, 1),
+		Vector2i(6, 1),
+		Vector2i(5, 2),
+		Vector2i(6, 2),
+	]
+	vidas_enemigos = [VIDA_MAX_ENEMIGO, VIDA_MAX_ENEMIGO, VIDA_MAX_ENEMIGO, VIDA_MAX_ENEMIGO]
+	enemigos_vivos = [true, true, true, true]
+	estado = "jugando"
+	celda_tocada = Vector2i(-1, -1)
 	for i in 4:
 		_actualizar_memoria(i)
 
@@ -84,6 +122,12 @@ func _es_pared(celda: Vector2i) -> bool:
 func _celda_ocupada_por_buzo(celda: Vector2i) -> int:
 	for i in 4:
 		if buzos_vivos[i] and celdas_buzos[i] == celda:
+			return i
+	return -1
+
+func _celda_ocupada_por_enemigo(celda: Vector2i) -> int:
+	for i in 4:
+		if enemigos_vivos[i] and celdas_enemigos[i] == celda:
 			return i
 	return -1
 
@@ -154,6 +198,8 @@ func _paso_hacia(origen_celda: Vector2i, destino: Vector2i) -> Vector2i:
 		return origen_celda
 	if _celda_ocupada_por_buzo(siguiente) >= 0:
 		return origen_celda
+	if _celda_ocupada_por_enemigo(siguiente) >= 0:
+		return origen_celda
 	return siguiente
 
 func _todos_sin_puntos() -> bool:
@@ -170,7 +216,6 @@ func _siguiente_buzo_con_puntos() -> int:
 	return buzo_activo
 
 func _siguiente_buzo_vivo() -> int:
-	# Devuelve el índice del siguiente buzo vivo, o -1 si no queda ninguno.
 	for i in 4:
 		var idx := (buzo_activo + 1 + i) % 4
 		if buzos_vivos[idx]:
@@ -178,24 +223,58 @@ func _siguiente_buzo_vivo() -> int:
 	return -1
 
 func _aplicar_muerte_buzo(idx: int) -> void:
-	# Marca al buzo como muerto y ajusta el buzo activo si era él.
 	buzos_vivos[idx] = false
 	if idx == buzo_activo:
 		var siguiente := _siguiente_buzo_vivo()
 		if siguiente >= 0:
 			buzo_activo = siguiente
 
+func _comprobar_fin() -> void:
+	# ¿Quedan enemigos vivos?
+	var hay_enemigos := false
+	for i in 4:
+		if enemigos_vivos[i]:
+			hay_enemigos = true
+			break
+	if not hay_enemigos:
+		estado = "victoria"
+		return
+	# ¿Quedan buzos vivos?
+	var hay_buzos := false
+	for i in 4:
+		if buzos_vivos[i]:
+			hay_buzos = true
+			break
+	if not hay_buzos:
+		estado = "derrota"
+
 func _turno_enemigo() -> void:
-	if enemigo_vivo:
-		var distancia := _distancia_celdas(celda_enemigo, celdas_buzos[buzo_activo])
-		if distancia <= ALCANCE_ATAQUE:
-			vidas_buzos[buzo_activo] = maxi(vidas_buzos[buzo_activo] - DANO_ATAQUE, 0)
-			if vidas_buzos[buzo_activo] <= 0:
-				_aplicar_muerte_buzo(buzo_activo)
+	# Cada enemigo actúa por separado
+	for e in 4:
+		if not enemigos_vivos[e]:
+			continue
+		# Busca el buzo vivo más cercano
+		var objetivo := -1
+		var dist_min := 9999
+		for b in 4:
+			if not buzos_vivos[b]:
+				continue
+			var d := _distancia_celdas(celdas_enemigos[e], celdas_buzos[b])
+			if d < dist_min:
+				dist_min = d
+				objetivo = b
+		if objetivo < 0:
+			continue
+		if dist_min <= ALCANCE_ATAQUE:
+			vidas_buzos[objetivo] = maxi(vidas_buzos[objetivo] - DANO_ATAQUE, 0)
+			if vidas_buzos[objetivo] <= 0:
+				_aplicar_muerte_buzo(objetivo)
 		else:
-			celda_enemigo = _paso_hacia(celda_enemigo, celdas_buzos[buzo_activo])
+			celdas_enemigos[e] = _paso_hacia(celdas_enemigos[e], celdas_buzos[objetivo])
+	# Recarga puntos de todos los buzos
 	for i in 4:
 		puntos_buzos[i] = PUNTOS_ACCION_MAX
+	_comprobar_fin()
 
 func _input(event: InputEvent) -> void:
 	var pos := Vector2.ZERO
@@ -208,35 +287,47 @@ func _input(event: InputEvent) -> void:
 		pos = event.position
 		hay_toque = true
 
-	if hay_toque:
-		_calcular_geometria()
-		var celda := _posicion_a_celda(pos)
-		if not _celda_valida(celda):
-			return
+	if not hay_toque:
+		return
 
-		celda_tocada = celda
-		var idx_tocado := _celda_ocupada_por_buzo(celda)
+	# Si la partida terminó, cualquier toque reinicia
+	if estado != "jugando":
+		_reiniciar()
+		queue_redraw()
+		return
 
-		if idx_tocado >= 0:
-			if idx_tocado == buzo_activo:
-				_turno_enemigo()
-				for i in 4:
-					_actualizar_memoria(i)
-			else:
-				buzo_activo = idx_tocado
-		elif enemigo_vivo and celda == celda_enemigo:
+	_calcular_geometria()
+	var celda := _posicion_a_celda(pos)
+	if not _celda_valida(celda):
+		return
+
+	celda_tocada = celda
+	var idx_tocado := _celda_ocupada_por_buzo(celda)
+
+	if idx_tocado >= 0:
+		if idx_tocado == buzo_activo:
+			_turno_enemigo()
+			for i in 4:
+				_actualizar_memoria(i)
+		else:
+			buzo_activo = idx_tocado
+	else:
+		var idx_enemigo := _celda_ocupada_por_enemigo(celda)
+		if idx_enemigo >= 0:
 			var distancia := _distancia_celdas(celdas_buzos[buzo_activo], celda)
 			if distancia <= ALCANCE_ATAQUE and puntos_buzos[buzo_activo] >= COSTE_ATAQUE:
-				vida_enemigo -= DANO_ATAQUE
+				vidas_enemigos[idx_enemigo] -= DANO_ATAQUE
 				puntos_buzos[buzo_activo] -= COSTE_ATAQUE
-				if vida_enemigo <= 0:
-					enemigo_vivo = false
-				if _todos_sin_puntos():
-					_turno_enemigo()
-					for i in 4:
-						_actualizar_memoria(i)
-				elif puntos_buzos[buzo_activo] <= 0:
-					buzo_activo = _siguiente_buzo_con_puntos()
+				if vidas_enemigos[idx_enemigo] <= 0:
+					enemigos_vivos[idx_enemigo] = false
+				_comprobar_fin()
+				if estado == "jugando":
+					if _todos_sin_puntos():
+						_turno_enemigo()
+						for i in 4:
+							_actualizar_memoria(i)
+					elif puntos_buzos[buzo_activo] <= 0:
+						buzo_activo = _siguiente_buzo_con_puntos()
 		elif not _es_pared(celda):
 			var distancia := _distancia_celdas(celdas_buzos[buzo_activo], celda)
 			if distancia > 0 and distancia <= puntos_buzos[buzo_activo]:
@@ -251,7 +342,7 @@ func _input(event: InputEvent) -> void:
 				elif puntos_buzos[buzo_activo] <= 0:
 					buzo_activo = _siguiente_buzo_con_puntos()
 
-		queue_redraw()
+	queue_redraw()
 
 func _draw() -> void:
 	_calcular_geometria()
@@ -269,8 +360,13 @@ func _draw() -> void:
 		var esquina := origen + Vector2(celda_tocada) * lado
 		draw_rect(Rect2(esquina, Vector2(lado, lado)), COLOR_TOQUE, false, 3.0)
 
-	if enemigo_vivo and _esta_iluminada(celda_enemigo):
-		var centro_e := origen + (Vector2(celda_enemigo) + Vector2(0.5, 0.5)) * lado
+	# Dibujar los 4 enemigos
+	for e in 4:
+		if not enemigos_vivos[e]:
+			continue
+		if not _esta_iluminada(celdas_enemigos[e]):
+			continue
+		var centro_e := origen + (Vector2(celdas_enemigos[e]) + Vector2(0.5, 0.5)) * lado
 		var r := lado * 0.32
 		var puntos_rombo := PackedVector2Array([
 			centro_e + Vector2(0, -r),
@@ -280,6 +376,7 @@ func _draw() -> void:
 		])
 		draw_colored_polygon(puntos_rombo, COLOR_ENEMIGO)
 
+	# Dibujar los 4 buzos
 	for i in 4:
 		if not buzos_vivos[i]:
 			continue
@@ -288,6 +385,7 @@ func _draw() -> void:
 			draw_circle(centro, lado * 0.40, COLOR_BUZO_ACTIVO)
 		draw_circle(centro, lado * 0.32, COLOR_BUZO)
 
+	# Niebla
 	for f in FILAS:
 		for c in COLUMNAS:
 			var celda := Vector2i(c, f)
@@ -303,6 +401,7 @@ func _draw() -> void:
 			else:
 				draw_rect(Rect2(esquina_n, Vector2(lado, lado)), COLOR_NIEBLA)
 
+	# HUD
 	var radio_pip := lado * 0.12
 	for i in PUNTOS_ACCION_MAX:
 		var c_pip := origen + Vector2(radio_pip * 3.0 * i + radio_pip * 2.0, radio_pip * 2.0)
@@ -310,11 +409,8 @@ func _draw() -> void:
 	for i in VIDA_MAX_BUZO:
 		var c_vida := origen + Vector2(radio_pip * 3.0 * i + radio_pip * 2.0, radio_pip * 5.0)
 		draw_circle(c_vida, radio_pip, COLOR_BUZO if i < vidas_buzos[buzo_activo] else COLOR_LINEA)
-	if enemigo_vivo:
-		for i in VIDA_MAX_ENEMIGO:
-			var c_ve := origen + Vector2(lado * COLUMNAS - radio_pip * 3.0 * i - radio_pip * 2.0, radio_pip * 2.0)
-			draw_circle(c_ve, radio_pip, COLOR_ENEMIGO if i < vida_enemigo else COLOR_LINEA)
 
+	# Barra de oxígeno del buzo activo
 	var centro_activo := origen + (Vector2(celdas_buzos[buzo_activo]) + Vector2(0.5, 0.5)) * lado
 	var barra_ancho := lado * 0.14
 	var barra_alto  := lado * 0.80
@@ -328,3 +424,30 @@ func _draw() -> void:
 		Rect2(Vector2(barra_x, barra_y + barra_alto - relleno_alto), Vector2(barra_ancho, relleno_alto)),
 		color_o2
 	)
+
+	# Pantalla de fin: victoria o derrota
+	if estado != "jugando":
+		var pantalla := get_viewport_rect().size
+		draw_rect(Rect2(Vector2.ZERO, pantalla), Color(0, 0, 0, 0.75))
+		var texto := "VICTORIA" if estado == "victoria" else "DERROTA"
+		var color_texto := Color("4ecdc4") if estado == "victoria" else Color("c1382d")
+		var tam := lado * 1.2
+		var pos_texto := Vector2(pantalla.x / 2.0, pantalla.y / 2.0)
+		draw_string(
+			ThemeDB.fallback_font,
+			pos_texto,
+			texto,
+			HORIZONTAL_ALIGNMENT_CENTER,
+			-1,
+			int(tam),
+			color_texto
+		)
+		draw_string(
+			ThemeDB.fallback_font,
+			pos_texto + Vector2(0, tam * 1.4),
+			"Toca para reiniciar",
+			HORIZONTAL_ALIGNMENT_CENTER,
+			-1,
+			int(tam * 0.45),
+			COLOR_TEXTO
+		)
