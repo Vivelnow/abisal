@@ -290,10 +290,13 @@ func _input(event: InputEvent) -> void:
 	if not hay_toque:
 		return
 
-	# Si la partida terminó, cualquier toque reinicia
+	# Si la partida terminó: victoria manda a la base, derrota reinicia la misión
 	if estado != "jugando":
-		_reiniciar()
-		queue_redraw()
+		if estado == "victoria":
+			get_tree().change_scene_to_file("res://base.tscn")
+		else:
+			_reiniciar()
+			queue_redraw()
 		return
 
 	_calcular_geometria()
@@ -442,10 +445,11 @@ func _draw() -> void:
 			int(tam),
 			color_texto
 		)
+		var texto_accion := "Toca para ir a la base" if estado == "victoria" else "Toca para reiniciar"
 		draw_string(
 			ThemeDB.fallback_font,
 			pos_texto + Vector2(0, tam * 1.4),
-			"Toca para reiniciar",
+			texto_accion,
 			HORIZONTAL_ALIGNMENT_CENTER,
 			-1,
 			int(tam * 0.45),
