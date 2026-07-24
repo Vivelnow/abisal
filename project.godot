@@ -17,7 +17,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
-DatosPartida="*uid://cut5wxnhpc16t"
+DatosPartida="*uid://be0ej7ik5vey0"
 
 [display]
 
