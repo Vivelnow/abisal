@@ -14,12 +14,13 @@ const COLOR_MUERTO     := Color("2a2a2a")
 
 const VIDA_MAX := 3
 
-# Estos datos llegan desde la escena de misión al cambiar de escena.
-# Los recibimos a través del Autoload "DatosPartida" (lo crearemos después).
-# Por ahora los inicializamos aquí para que la pantalla funcione sola.
-var vidas       := [3, 2, 1, 3]   # vida actual de cada buzo
+# Estos datos llegan desde la escena de misión al cambiar de escena,
+# a través del Autoload "DatosPartida". Los valores de aquí abajo son
+# solo un respaldo por si esta escena se abriera sola sin haber jugado
+# una misión antes; en _ready() se sobrescriben con los reales.
+var vidas       := [3, 3, 3, 3]   # vida actual de cada buzo
 var buzos_vivos := [true, true, true, true]
-var piezas      := 2               # piezas recuperadas en la misión
+var piezas      := 0               # piezas recuperadas en la misión
 
 var boton_curar_rect  := []   # guardamos los rectángulos de los botones para detectar toques
 var boton_mision_rect := Rect2()
@@ -28,6 +29,10 @@ var lado   := 0.0
 var origen := Vector2.ZERO
 
 func _ready() -> void:
+	# Leemos los datos reales de la última misión desde la mochila global.
+	vidas = DatosPartida.vidas_guardadas.duplicate()
+	buzos_vivos = DatosPartida.buzos_vivos_guardados.duplicate()
+	piezas = DatosPartida.piezas_guardadas
 	# Precalculamos la geometría una sola vez al arrancar
 	_calcular_geometria()
 	# Construimos los rectángulos de los botones
@@ -105,18 +110,18 @@ func _draw() -> void:
 	var tam_titulo := lado * 0.7
 	draw_string(
 		ThemeDB.fallback_font,
-		Vector2(pantalla.x / 2.0, origen.y + lado * 0.9),
+		Vector2(0, origen.y + lado * 0.9),
 		"BASE — CIZH",
-		HORIZONTAL_ALIGNMENT_CENTER, -1, int(tam_titulo), COLOR_TEXTO
+		HORIZONTAL_ALIGNMENT_CENTER, pantalla.x, int(tam_titulo), COLOR_TEXTO
 	)
 
 	# Piezas disponibles
 	var tam_texto := lado * 0.45
 	draw_string(
 		ThemeDB.fallback_font,
-		Vector2(pantalla.x / 2.0, origen.y + lado * 1.7),
+		Vector2(0, origen.y + lado * 1.7),
 		"Piezas recuperadas: " + str(piezas),
-		HORIZONTAL_ALIGNMENT_CENTER, -1, int(tam_texto), COLOR_VIDA_LLENA
+		HORIZONTAL_ALIGNMENT_CENTER, pantalla.x, int(tam_texto), COLOR_VIDA_LLENA
 	)
 
 	# Fila por buzo
@@ -159,9 +164,9 @@ func _draw() -> void:
 		draw_rect(rect, COLOR_BOTON_ACT if puede_curar else COLOR_BOTON)
 		draw_string(
 			ThemeDB.fallback_font,
-			Vector2(rect.position.x + rect.size.x / 2.0, rect.position.y + rect.size.y * 0.72),
+			Vector2(rect.position.x, rect.position.y + rect.size.y * 0.72),
 			"Curar (1)",
-			HORIZONTAL_ALIGNMENT_CENTER, -1, int(tam_texto * 0.85),
+			HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, int(tam_texto * 0.85),
 			COLOR_TEXTO if puede_curar else COLOR_VIDA_VACIA
 		)
 
@@ -169,8 +174,8 @@ func _draw() -> void:
 	draw_rect(boton_mision_rect, COLOR_BOTON_ACT)
 	draw_string(
 		ThemeDB.fallback_font,
-		Vector2(boton_mision_rect.position.x + boton_mision_rect.size.x / 2.0,
+		Vector2(boton_mision_rect.position.x,
 				boton_mision_rect.position.y + boton_mision_rect.size.y * 0.72),
 		"Siguiente misión →",
-		HORIZONTAL_ALIGNMENT_CENTER, -1, int(tam_texto), COLOR_TEXTO
+		HORIZONTAL_ALIGNMENT_CENTER, boton_mision_rect.size.x, int(tam_texto), COLOR_TEXTO
 	)
