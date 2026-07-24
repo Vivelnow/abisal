@@ -293,6 +293,10 @@ func _input(event: InputEvent) -> void:
 	# Si la partida terminó: victoria manda a la base, derrota reinicia la misión
 	if estado != "jugando":
 		if estado == "victoria":
+			# Guardamos en la mochila los datos de la misión que acaba de
+			# terminar, antes de cambiar a la escena de base. Piezas a 0:
+			# todavía no existe un sistema que las cuente (decisión 24/07).
+			DatosPartida.guardar_partida(vidas_buzos, buzos_vivos, 0)
 			get_tree().change_scene_to_file("res://base.tscn")
 		else:
 			_reiniciar()
@@ -435,13 +439,13 @@ func _draw() -> void:
 		var texto := "VICTORIA" if estado == "victoria" else "DERROTA"
 		var color_texto := Color("4ecdc4") if estado == "victoria" else Color("c1382d")
 		var tam := lado * 1.2
-		var pos_texto := Vector2(pantalla.x / 2.0, pantalla.y / 2.0)
+		var pos_texto := Vector2(0, pantalla.y / 2.0)
 		draw_string(
 			ThemeDB.fallback_font,
 			pos_texto,
 			texto,
 			HORIZONTAL_ALIGNMENT_CENTER,
-			-1,
+			pantalla.x,
 			int(tam),
 			color_texto
 		)
@@ -451,7 +455,7 @@ func _draw() -> void:
 			pos_texto + Vector2(0, tam * 1.4),
 			texto_accion,
 			HORIZONTAL_ALIGNMENT_CENTER,
-			-1,
+			pantalla.x,
 			int(tam * 0.45),
 			COLOR_TEXTO
 		)
