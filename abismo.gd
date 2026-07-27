@@ -406,12 +406,20 @@ func _input(event: InputEvent) -> void:
 				puntos_buzos[buzo_activo] -= distancia
 				oxigenos_buzos[buzo_activo] = maxi(oxigenos_buzos[buzo_activo] - distancia, 0)
 				_actualizar_memoria(buzo_activo)
-				if _todos_sin_puntos():
-					_turno_enemigo()
-					for i in 4:
-						_actualizar_memoria(i)
-				elif puntos_buzos[buzo_activo] <= 0:
-					buzo_activo = _siguiente_buzo_con_puntos()
+				# Retirada forzosa a oxígeno cero (paso 2): sin aire y
+				# fuera de la salida, el buzo se ahoga — mismo camino
+				# que morir en combate. Si estaba en la salida en ese
+				# instante, no pasa nada: llegó justo a tiempo.
+				if oxigenos_buzos[buzo_activo] <= 0 and celda != CELDA_SALIDA:
+					_aplicar_muerte_buzo(buzo_activo)
+					_comprobar_fin()
+				if estado == "jugando":
+					if _todos_sin_puntos():
+						_turno_enemigo()
+						for i in 4:
+							_actualizar_memoria(i)
+					elif puntos_buzos[buzo_activo] <= 0:
+						buzo_activo = _siguiente_buzo_con_puntos()
 
 	queue_redraw()
 
