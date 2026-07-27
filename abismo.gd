@@ -27,6 +27,13 @@ const OXIGENO_MAX := 12
 const COLOR_OXIGENO_LLENO := Color("2a9df4")
 const COLOR_OXIGENO_BAJO  := Color("e63946")
 
+# --- LA SALIDA (submarino) ---
+const CELDA_SALIDA := Vector2i(1, 11)
+const COLOR_SALIDA := Color("5ec98f")
+const COLOR_SALIDA_GRIS := Color("2f5a45")
+const COLOR_BOTON := Color("1e4a66")
+const COLOR_BOTON_ACT := Color("2a9df4")
+
 const PAREDES := [
 	Vector2i(2, 2), Vector2i(3, 2), Vector2i(4, 2),
 	Vector2i(2, 3),
@@ -65,8 +72,29 @@ var estado := "jugando"
 var celda_tocada := Vector2i(-1, -1)
 var lado := 0.0
 var origen := Vector2.ZERO
+var boton_zarpar_rect := Rect2()
+
+# F2.4 — Carga la vida y quién sigue vivo desde la "mochila" (Autoload
+# DatosPartida), en vez de empezar siempre con los 4 buzos sanos.
+#
+# El .duplicate() es obligatorio: en GDScript los Array se pasan por
+# REFERENCIA. Sin duplicate(), vidas_buzos y DatosPartida.vidas_guardadas
+# serían el mismo array en memoria, y cualquier golpe durante la misión
+# mutaría directamente los datos guardados antes de que la misión termine.
+#
+# Si el buzo activo (índice 0 por defecto) llegó muerto de la misión
+# anterior, se pasa el turno inicial al primer buzo vivo que haya.
+func _cargar_equipo_desde_mochila() -> void:
+	vidas_buzos = DatosPartida.vidas_guardadas.duplicate()
+	buzos_vivos = DatosPartida.buzos_vivos_guardados.duplicate()
+	buzo_activo = 0
+	if not buzos_vivos[buzo_activo]:
+		var vivo := _siguiente_buzo_vivo()
+		if vivo >= 0:
+			buzo_activo = vivo
 
 func _ready() -> void:
+	_cargar_equipo_desde_mochila()
 	for i in 4:
 		_actualizar_memoria(i)
 
@@ -77,11 +105,12 @@ func _reiniciar() -> void:
 		Vector2i(1, 10),
 		Vector2i(2, 10),
 	]
-	vidas_buzos = [VIDA_MAX_BUZO, VIDA_MAX_BUZO, VIDA_MAX_BUZO, VIDA_MAX_BUZO]
+	# Recarga el mismo equipo con el que se empezó esta misión (no vida
+	# completa a pelo): reintentar tiene que ser fiel al estado real,
+	# si no, perder y reiniciar se convertiría en curarse gratis.
+	_cargar_equipo_desde_mochila()
 	puntos_buzos = [PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX]
 	oxigenos_buzos = [OXIGENO_MAX, OXIGENO_MAX, OXIGENO_MAX, OXIGENO_MAX]
-	buzos_vivos = [true, true, true, true]
-	buzo_activo = 0
 	celdas_vistas = [{}, {}, {}, {}]
 	celdas_enemigos = [
 		Vector2i(5, 1),
@@ -103,6 +132,28 @@ func _calcular_geometria() -> void:
 		(pantalla.x - lado * COLUMNAS) / 2.0,
 		(pantalla.y - lado * FILAS) / 2.0
 	)
+	boton_zarpar_rect = Rect2(
+		0,
+		pantalla.y - lado * 1.1,
+		pantalla.x,
+		lado * 1.1
+	)
+
+# Cuenta cuántos buzos vivos están ahora mismo sobre la celda de salida.
+func _buzos_a_bordo() -> int:
+	var cuenta := 0
+	for i in 4:
+		if buzos_vivos[i] and celdas_buzos[i] == CELDA_SALIDA:
+			cuenta += 1
+	return cuenta
+
+# Zarpar: quien esté sobre la salida se salva, quien no, se abandona
+# (buzos_vivos = false, permanente, igual que morir en combate).
+func _zarpar() -> void:
+	for i in 4:
+		if buzos_vivos[i] and celdas_buzos[i] != CELDA_SALIDA:
+			buzos_vivos[i] = false
+	estado = "retirada"
 
 func _posicion_a_celda(pos: Vector2) -> Vector2i:
 	return Vector2i(
@@ -290,9 +341,9 @@ func _input(event: InputEvent) -> void:
 	if not hay_toque:
 		return
 
-	# Si la partida terminó: victoria manda a la base, derrota reinicia la misión
+	# Si la partida terminó: victoria/retirada mandan a la base, derrota reinicia
 	if estado != "jugando":
-		if estado == "victoria":
+		if estado == "victoria" or estado == "retirada":
 			# Guardamos en la mochila los datos de la misión que acaba de
 			# terminar, antes de cambiar a la escena de base. Piezas a 0:
 			# todavía no existe un sistema que las cuente (decisión 24/07).
@@ -304,6 +355,14 @@ func _input(event: InputEvent) -> void:
 		return
 
 	_calcular_geometria()
+
+	# ¿Tocó el botón de Zarpar? Solo hace algo si hay al menos 1 a bordo.
+	if boton_zarpar_rect.has_point(pos):
+		if _buzos_a_bordo() > 0:
+			_zarpar()
+			queue_redraw()
+		return
+
 	var celda := _posicion_a_celda(pos)
 	if not _celda_valida(celda):
 		return
@@ -311,14 +370,19 @@ func _input(event: InputEvent) -> void:
 	celda_tocada = celda
 	var idx_tocado := _celda_ocupada_por_buzo(celda)
 
-	if idx_tocado >= 0:
-		if idx_tocado == buzo_activo:
-			_turno_enemigo()
-			for i in 4:
-				_actualizar_memoria(i)
-		else:
-			buzo_activo = idx_tocado
+	if idx_tocado == buzo_activo:
+		# Tocar tu propio buzo activo: fin de turno manual. Vale también
+		# estando en la salida.
+		_turno_enemigo()
+		for i in 4:
+			_actualizar_memoria(i)
+	elif idx_tocado >= 0 and celda != CELDA_SALIDA:
+		# Tocar a otro buzo fuera de la salida: lo seleccionas.
+		buzo_activo = idx_tocado
 	else:
+		# Celda vacía, o la salida con otro buzo ya dentro: intenta
+		# moverte o atacar. Esto es lo que permite que varios buzos se
+		# junten en la salida antes de zarpar.
 		var idx_enemigo := _celda_ocupada_por_enemigo(celda)
 		if idx_enemigo >= 0:
 			var distancia := _distancia_celdas(celdas_buzos[buzo_activo], celda)
@@ -400,9 +464,13 @@ func _draw() -> void:
 			if _esta_iluminada(celda):
 				if _es_pared(celda):
 					draw_rect(Rect2(esquina_n, Vector2(lado, lado)), COLOR_PARED)
+				elif celda == CELDA_SALIDA:
+					draw_rect(Rect2(esquina_n, Vector2(lado, lado)), COLOR_SALIDA)
 			elif _celda_en_memoria(celda):
 				if _es_pared(celda):
 					draw_rect(Rect2(esquina_n, Vector2(lado, lado)), COLOR_PARED_GRIS)
+				elif celda == CELDA_SALIDA:
+					draw_rect(Rect2(esquina_n, Vector2(lado, lado)), COLOR_SALIDA_GRIS)
 				else:
 					draw_rect(Rect2(esquina_n, Vector2(lado, lado)), COLOR_GRIS)
 			else:
@@ -432,12 +500,33 @@ func _draw() -> void:
 		color_o2
 	)
 
-	# Pantalla de fin: victoria o derrota
+	# Botón Zarpar — solo mientras se está jugando
+	if estado == "jugando":
+		var a_bordo := _buzos_a_bordo()
+		var puede_zarpar := a_bordo > 0
+		draw_rect(boton_zarpar_rect, COLOR_BOTON_ACT if puede_zarpar else COLOR_BOTON)
+		draw_string(
+			ThemeDB.fallback_font,
+			Vector2(boton_zarpar_rect.position.x, boton_zarpar_rect.position.y + boton_zarpar_rect.size.y * 0.65),
+			"Zarpar (%d a bordo)" % a_bordo,
+			HORIZONTAL_ALIGNMENT_CENTER,
+			boton_zarpar_rect.size.x,
+			int(lado * 0.4),
+			COLOR_TEXTO
+		)
+
+	# Pantalla de fin: victoria, retirada o derrota
 	if estado != "jugando":
 		var pantalla := get_viewport_rect().size
 		draw_rect(Rect2(Vector2.ZERO, pantalla), Color(0, 0, 0, 0.75))
-		var texto := "VICTORIA" if estado == "victoria" else "DERROTA"
-		var color_texto := Color("4ecdc4") if estado == "victoria" else Color("c1382d")
+		var texto := "VICTORIA"
+		var color_texto := Color("4ecdc4")
+		if estado == "derrota":
+			texto = "DERROTA"
+			color_texto = Color("c1382d")
+		elif estado == "retirada":
+			texto = "RETIRADA"
+			color_texto = Color("f2c14e")
 		var tam := lado * 1.2
 		var pos_texto := Vector2(0, pantalla.y / 2.0)
 		draw_string(
@@ -449,7 +538,7 @@ func _draw() -> void:
 			int(tam),
 			color_texto
 		)
-		var texto_accion := "Toca para ir a la base" if estado == "victoria" else "Toca para reiniciar"
+		var texto_accion := "Toca para reiniciar" if estado == "derrota" else "Toca para ir a la base"
 		draw_string(
 			ThemeDB.fallback_font,
 			pos_texto + Vector2(0, tam * 1.4),
