@@ -153,7 +153,17 @@ func _zarpar() -> void:
 	for i in 4:
 		if buzos_vivos[i] and celdas_buzos[i] != CELDA_SALIDA:
 			buzos_vivos[i] = false
-	estado = "retirada"
+	# Exterminar es una vía válida hacia la victoria, nunca obligatoria:
+	# la otra vía es cumplir el objetivo de la misión (todavía no
+	# existe en código — llegará con el roster real, DISEÑO §6). Si al
+	# zarpar no queda ningún enemigo, victoria; si queda alguno, es una
+	# retirada — te vas sin acabar.
+	var hay_enemigos := false
+	for i in 4:
+		if enemigos_vivos[i]:
+			hay_enemigos = true
+			break
+	estado = "victoria" if not hay_enemigos else "retirada"
 
 func _posicion_a_celda(pos: Vector2) -> Vector2i:
 	return Vector2i(
@@ -281,16 +291,10 @@ func _aplicar_muerte_buzo(idx: int) -> void:
 			buzo_activo = siguiente
 
 func _comprobar_fin() -> void:
-	# ¿Quedan enemigos vivos?
-	var hay_enemigos := false
-	for i in 4:
-		if enemigos_vivos[i]:
-			hay_enemigos = true
-			break
-	if not hay_enemigos:
-		estado = "victoria"
-		return
-	# ¿Quedan buzos vivos?
+	# Derrota: no queda ningún buzo vivo. La victoria ya NO se decide
+	# aquí — se decide al zarpar (ver _zarpar()), para que exterminar
+	# nunca sea obligatorio (lección del género, DISEÑO §10: nunca
+	# "busca al último enemigo escondido").
 	var hay_buzos := false
 	for i in 4:
 		if buzos_vivos[i]:
