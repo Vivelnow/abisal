@@ -23,7 +23,8 @@ const DANO_ATAQUE := 1
 const COSTE_ATAQUE := 1
 const ALCANCE_ATAQUE := 1
 const RADIO_LUZ := 3
-const OXIGENO_MAX := 12
+const OXIGENO_MAX := 40
+const DANO_ASFIXIA := 1
 const COLOR_OXIGENO_LLENO := Color("2a9df4")
 const COLOR_OXIGENO_BAJO  := Color("e63946")
 
@@ -326,6 +327,25 @@ func _turno_enemigo() -> void:
 				_aplicar_muerte_buzo(objetivo)
 		else:
 			celdas_enemigos[e] = _paso_hacia(celdas_enemigos[e], celdas_buzos[objetivo])
+
+	# El mar cobra por turno, no solo por moverse: cada buzo vivo gasta
+	# 1 de oxígeno al cerrar la ronda, se haya movido o no. Sin esto,
+	# quedarse quieto salía gratis y era la jugada óptima.
+	#
+	# A oxígeno 0 fuera de la salida empieza la agonía: -1 de vida por
+	# ronda hasta que llegue a la salida o se quede sin vida. No es
+	# muerte instantánea — el jugador tiene margen para reaccionar y
+	# corregir el rumbo, y la barra en rojo ya avisó una ronda antes
+	# (DISEÑO §10.7: ningún enemigo, y el mar tampoco, mata sin aviso).
+	for i in 4:
+		if not buzos_vivos[i]:
+			continue
+		oxigenos_buzos[i] = maxi(oxigenos_buzos[i] - 1, 0)
+		if oxigenos_buzos[i] <= 0 and celdas_buzos[i] != CELDA_SALIDA:
+			vidas_buzos[i] = maxi(vidas_buzos[i] - DANO_ASFIXIA, 0)
+			if vidas_buzos[i] <= 0:
+				_aplicar_muerte_buzo(i)
+
 	# Recarga puntos de todos los buzos
 	for i in 4:
 		puntos_buzos[i] = PUNTOS_ACCION_MAX
@@ -410,13 +430,11 @@ func _input(event: InputEvent) -> void:
 				puntos_buzos[buzo_activo] -= distancia
 				oxigenos_buzos[buzo_activo] = maxi(oxigenos_buzos[buzo_activo] - distancia, 0)
 				_actualizar_memoria(buzo_activo)
-				# Retirada forzosa a oxígeno cero (paso 2): sin aire y
-				# fuera de la salida, el buzo se ahoga — mismo camino
-				# que morir en combate. Si estaba en la salida en ese
-				# instante, no pasa nada: llegó justo a tiempo.
-				if oxigenos_buzos[buzo_activo] <= 0 and celda != CELDA_SALIDA:
-					_aplicar_muerte_buzo(buzo_activo)
-					_comprobar_fin()
+				# Llegar a 0 aquí no mata al instante: la barra se pone
+				# roja y avisa, pero la agonía (pérdida de vida) solo
+				# empieza a cobrarse al cerrar la ronda, en
+				# _turno_enemigo(). Da una ronda entera de aviso antes
+				# del primer punto de daño.
 				if estado == "jugando":
 					if _todos_sin_puntos():
 						_turno_enemigo()
@@ -464,6 +482,12 @@ func _draw() -> void:
 		if not buzos_vivos[i]:
 			continue
 		var centro := origen + (Vector2(celdas_buzos[i]) + Vector2(0.5, 0.5)) * lado
+		# Aro de agonía: visible esté o no seleccionado el buzo. Sin esto,
+		# la única pista de que alguien se está ahogando eran los pips de
+		# vida del HUD, y esos solo muestran al buzo activo — invisible
+		# si el que agoniza no es el que tienes seleccionado.
+		if oxigenos_buzos[i] <= 0 and celdas_buzos[i] != CELDA_SALIDA:
+			draw_circle(centro, lado * 0.46, COLOR_OXIGENO_BAJO, false, 4.0)
 		if i == buzo_activo:
 			draw_circle(centro, lado * 0.40, COLOR_BUZO_ACTIVO)
 		draw_circle(centro, lado * 0.32, COLOR_BUZO)
