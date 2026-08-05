@@ -18,7 +18,10 @@ const COLOR_TEXTO := Color("ffffff")
 
 const PUNTOS_ACCION_MAX := 4
 const VIDA_MAX_BUZO := 3
-const VIDA_MAX_ENEMIGO := 2
+# El arma del buzo: cuánto daño hace, cuánto cuesta en puntos de
+# acción y a qué distancia llega. Es del jugador, no del enemigo —
+# lo que cada tipo de criatura hace con SU ataque vive en la ficha
+# (fichas_criaturas.gd), no aquí.
 const DANO_ATAQUE := 1
 const COSTE_ATAQUE := 1
 const ALCANCE_ATAQUE := 1
@@ -56,15 +59,19 @@ var buzo_activo := 0
 
 var celdas_vistas := [{}, {}, {}, {}]
 
-# --- ENEMIGOS: ahora son 4, igual que los buzos ---
-var celdas_enemigos := [
-	Vector2i(5, 1),
-	Vector2i(6, 1),
-	Vector2i(5, 2),
-	Vector2i(6, 2),
+# --- ENEMIGOS ---
+# Un solo saco por enemigo: cada elemento lleva dentro su celda, su
+# vida, su tipo y si sigue vivo. Antes eran tres listas paralelas
+# (celdas_enemigos, vidas_enemigos, enemigos_vivos) y bastaba con que
+# una se desalineara para que el enemigo 3 tuviera la vida del 2.
+# Con esto, desalinearse ya no es posible: no hay tres listas que
+# alinear, hay una.
+var enemigos := [
+	{"celda": Vector2i(5, 1), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
+	{"celda": Vector2i(6, 1), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
+	{"celda": Vector2i(5, 2), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
+	{"celda": Vector2i(6, 2), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
 ]
-var vidas_enemigos := [VIDA_MAX_ENEMIGO, VIDA_MAX_ENEMIGO, VIDA_MAX_ENEMIGO, VIDA_MAX_ENEMIGO]
-var enemigos_vivos := [true, true, true, true]
 
 # --- ESTADO DE PARTIDA ---
 # "jugando", "victoria", "derrota"
@@ -113,14 +120,12 @@ func _reiniciar() -> void:
 	puntos_buzos = [PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX]
 	oxigenos_buzos = [OXIGENO_MAX, OXIGENO_MAX, OXIGENO_MAX, OXIGENO_MAX]
 	celdas_vistas = [{}, {}, {}, {}]
-	celdas_enemigos = [
-		Vector2i(5, 1),
-		Vector2i(6, 1),
-		Vector2i(5, 2),
-		Vector2i(6, 2),
+	enemigos = [
+		{"celda": Vector2i(5, 1), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
+		{"celda": Vector2i(6, 1), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
+		{"celda": Vector2i(5, 2), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
+		{"celda": Vector2i(6, 2), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
 	]
-	vidas_enemigos = [VIDA_MAX_ENEMIGO, VIDA_MAX_ENEMIGO, VIDA_MAX_ENEMIGO, VIDA_MAX_ENEMIGO]
-	enemigos_vivos = [true, true, true, true]
 	estado = "jugando"
 	celda_tocada = Vector2i(-1, -1)
 	for i in 4:
@@ -161,7 +166,7 @@ func _zarpar() -> void:
 	# retirada — te vas sin acabar.
 	var hay_enemigos := false
 	for i in 4:
-		if enemigos_vivos[i]:
+		if enemigos[i]["vivo"]:
 			hay_enemigos = true
 			break
 	estado = "victoria" if not hay_enemigos else "retirada"
@@ -189,7 +194,7 @@ func _celda_ocupada_por_buzo(celda: Vector2i) -> int:
 
 func _celda_ocupada_por_enemigo(celda: Vector2i) -> int:
 	for i in 4:
-		if enemigos_vivos[i] and celdas_enemigos[i] == celda:
+		if enemigos[i]["vivo"] and enemigos[i]["celda"] == celda:
 			return i
 	return -1
 
@@ -305,28 +310,19 @@ func _comprobar_fin() -> void:
 		estado = "derrota"
 
 func _turno_enemigo() -> void:
-	# Cada enemigo actúa por separado
+	# Cada enemigo actúa por separado. Buscar a quién atacar es igual
+	# para cualquier tipo de criatura; qué hace con ese objetivo ya no
+	# lo es. Añadir un tipo nuevo será escribir una función
+	# "_decidir_<tipo>()" y una línea en el match — sin tocar esta.
 	for e in 4:
-		if not enemigos_vivos[e]:
+		if not enemigos[e]["vivo"]:
 			continue
-		# Busca el buzo vivo más cercano
-		var objetivo := -1
-		var dist_min := 9999
-		for b in 4:
-			if not buzos_vivos[b]:
-				continue
-			var d := _distancia_celdas(celdas_enemigos[e], celdas_buzos[b])
-			if d < dist_min:
-				dist_min = d
-				objetivo = b
+		var objetivo := _buzo_vivo_mas_cercano(enemigos[e]["celda"])
 		if objetivo < 0:
 			continue
-		if dist_min <= ALCANCE_ATAQUE:
-			vidas_buzos[objetivo] = maxi(vidas_buzos[objetivo] - DANO_ATAQUE, 0)
-			if vidas_buzos[objetivo] <= 0:
-				_aplicar_muerte_buzo(objetivo)
-		else:
-			celdas_enemigos[e] = _paso_hacia(celdas_enemigos[e], celdas_buzos[objetivo])
+		match enemigos[e]["tipo"]:
+			"mele":
+				_decidir_mele(e, objetivo)
 
 	# El mar cobra por turno, no solo por moverse: cada buzo vivo gasta
 	# 1 de oxígeno al cerrar la ronda, se haya movido o no. Sin esto,
@@ -350,6 +346,34 @@ func _turno_enemigo() -> void:
 	for i in 4:
 		puntos_buzos[i] = PUNTOS_ACCION_MAX
 	_comprobar_fin()
+
+# Busca, entre los buzos vivos, el más cercano a una celda dada.
+# Común a cualquier tipo de criatura: todas necesitan saber a quién
+# tienen más cerca antes de decidir qué hacer con él.
+func _buzo_vivo_mas_cercano(desde: Vector2i) -> int:
+	var objetivo := -1
+	var dist_min := 9999
+	for b in 4:
+		if not buzos_vivos[b]:
+			continue
+		var d := _distancia_celdas(desde, celdas_buzos[b])
+		if d < dist_min:
+			dist_min = d
+			objetivo = b
+	return objetivo
+
+# Comportamiento del melé: si el objetivo está a su alcance, ataca;
+# si no, avanza un paso hacia él. Vida, daño y alcance salen de su
+# ficha (fichas_criaturas.gd), no de una constante compartida.
+func _decidir_mele(idx_enemigo: int, objetivo: int) -> void:
+	var ficha: Dictionary = FichasCriaturas.FICHAS["mele"]
+	var distancia := _distancia_celdas(enemigos[idx_enemigo]["celda"], celdas_buzos[objetivo])
+	if distancia <= ficha["alcance"]:
+		vidas_buzos[objetivo] = maxi(vidas_buzos[objetivo] - int(ficha["dano"]), 0)
+		if vidas_buzos[objetivo] <= 0:
+			_aplicar_muerte_buzo(objetivo)
+	else:
+		enemigos[idx_enemigo]["celda"] = _paso_hacia(enemigos[idx_enemigo]["celda"], celdas_buzos[objetivo])
 
 func _input(event: InputEvent) -> void:
 	var pos := Vector2.ZERO
@@ -411,10 +435,10 @@ func _input(event: InputEvent) -> void:
 		if idx_enemigo >= 0:
 			var distancia := _distancia_celdas(celdas_buzos[buzo_activo], celda)
 			if distancia <= ALCANCE_ATAQUE and puntos_buzos[buzo_activo] >= COSTE_ATAQUE:
-				vidas_enemigos[idx_enemigo] -= DANO_ATAQUE
+				enemigos[idx_enemigo]["vida"] -= DANO_ATAQUE
 				puntos_buzos[buzo_activo] -= COSTE_ATAQUE
-				if vidas_enemigos[idx_enemigo] <= 0:
-					enemigos_vivos[idx_enemigo] = false
+				if enemigos[idx_enemigo]["vida"] <= 0:
+					enemigos[idx_enemigo]["vivo"] = false
 				_comprobar_fin()
 				if estado == "jugando":
 					if _todos_sin_puntos():
@@ -463,11 +487,11 @@ func _draw() -> void:
 
 	# Dibujar los 4 enemigos
 	for e in 4:
-		if not enemigos_vivos[e]:
+		if not enemigos[e]["vivo"]:
 			continue
-		if not _esta_iluminada(celdas_enemigos[e]):
+		if not _esta_iluminada(enemigos[e]["celda"]):
 			continue
-		var centro_e := origen + (Vector2(celdas_enemigos[e]) + Vector2(0.5, 0.5)) * lado
+		var centro_e := origen + (Vector2(enemigos[e]["celda"]) + Vector2(0.5, 0.5)) * lado
 		var r := lado * 0.32
 		var puntos_rombo := PackedVector2Array([
 			centro_e + Vector2(0, -r),
