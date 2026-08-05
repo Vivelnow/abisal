@@ -167,7 +167,7 @@ func _draw() -> void:
 			Vector2(rect.position.x, rect.position.y + rect.size.y * 0.72),
 			"Curar (1)",
 			HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, int(tam_texto * 0.85),
-			COLOR_TEXTO if puede_curar else COLOR_VIDA_VACIA
+			COLOR_TEXTO
 		)
 
 	# Botón siguiente misión
