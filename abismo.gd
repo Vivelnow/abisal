@@ -10,6 +10,7 @@ const COLOR_BUZO := Color("f2c14e")
 const COLOR_BUZO_ACTIVO := Color("ffffff")
 const COLOR_ENEMIGO := Color("c1382d")
 const COLOR_ENEMIGO_DISTANCIA := Color("e0793e")
+const COLOR_ENEMIGO_APAGALUCES := Color("9b59b6")
 const COLOR_TOQUE := Color("4ecdc4")
 const COLOR_PIP_LLENO := Color("4ecdc4")
 const COLOR_PIP_VACIO := Color("1e4a66")
@@ -55,6 +56,14 @@ var celdas_buzos := [
 var vidas_buzos := [VIDA_MAX_BUZO, VIDA_MAX_BUZO, VIDA_MAX_BUZO, VIDA_MAX_BUZO]
 var puntos_buzos := [PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX]
 var oxigenos_buzos := [OXIGENO_MAX, OXIGENO_MAX, OXIGENO_MAX, OXIGENO_MAX]
+# Radio de luz por buzo. Antes RADIO_LUZ era una única constante para
+# los 4 — el apagaluces necesita poder dejar a UNO sin luz sin tocar
+# a los demás, así que cada buzo lleva ahora el suyo. Empiezan todos
+# igual a RADIO_LUZ; el apagaluces pone uno a 0.
+var radios_luz_buzos := [RADIO_LUZ, RADIO_LUZ, RADIO_LUZ, RADIO_LUZ]
+# Turnos que le quedan a cada buzo sin luz. 0 = ve con normalidad.
+# Al llegar a 0 se le devuelve su radio_luz_buzos.
+var turnos_sin_luz_buzos := [0, 0, 0, 0]
 var buzos_vivos := [true, true, true, true]
 var buzo_activo := 0
 
@@ -71,7 +80,7 @@ var enemigos := [
 	{"celda": Vector2i(5, 1), "tipo": "distancia", "vida": FichasCriaturas.FICHAS["distancia"]["vida"], "vivo": true},
 	{"celda": Vector2i(6, 1), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
 	{"celda": Vector2i(5, 2), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
-	{"celda": Vector2i(6, 2), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
+	{"celda": Vector2i(6, 2), "tipo": "apagaluces", "vida": FichasCriaturas.FICHAS["apagaluces"]["vida"], "vivo": true},
 ]
 
 # --- ESTADO DE PARTIDA ---
@@ -120,12 +129,14 @@ func _reiniciar() -> void:
 	_cargar_equipo_desde_mochila()
 	puntos_buzos = [PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX, PUNTOS_ACCION_MAX]
 	oxigenos_buzos = [OXIGENO_MAX, OXIGENO_MAX, OXIGENO_MAX, OXIGENO_MAX]
+	radios_luz_buzos = [RADIO_LUZ, RADIO_LUZ, RADIO_LUZ, RADIO_LUZ]
+	turnos_sin_luz_buzos = [0, 0, 0, 0]
 	celdas_vistas = [{}, {}, {}, {}]
 	enemigos = [
 		{"celda": Vector2i(5, 1), "tipo": "distancia", "vida": FichasCriaturas.FICHAS["distancia"]["vida"], "vivo": true},
 		{"celda": Vector2i(6, 1), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
 		{"celda": Vector2i(5, 2), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
-		{"celda": Vector2i(6, 2), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
+		{"celda": Vector2i(6, 2), "tipo": "apagaluces", "vida": FichasCriaturas.FICHAS["apagaluces"]["vida"], "vivo": true},
 	]
 	estado = "jugando"
 	celda_tocada = Vector2i(-1, -1)
@@ -227,7 +238,7 @@ func _tiene_vision(desde: Vector2i, destino: Vector2i) -> bool:
 func _esta_iluminada_por(celda: Vector2i, buzo_idx: int) -> bool:
 	if not buzos_vivos[buzo_idx]:
 		return false
-	if _distancia_celdas(celda, celdas_buzos[buzo_idx]) > RADIO_LUZ:
+	if _distancia_celdas(celda, celdas_buzos[buzo_idx]) > radios_luz_buzos[buzo_idx]:
 		return false
 	return _tiene_vision(celdas_buzos[buzo_idx], celda)
 
@@ -262,6 +273,34 @@ func _paso_hacia(origen_celda: Vector2i, destino: Vector2i) -> Vector2i:
 	elif destino.y < origen_celda.y:
 		dy = -1
 	var siguiente := origen_celda + Vector2i(dx, dy)
+	if _es_pared(siguiente):
+		return origen_celda
+	if _celda_ocupada_por_buzo(siguiente) >= 0:
+		return origen_celda
+	if _celda_ocupada_por_enemigo(siguiente) >= 0:
+		return origen_celda
+	return siguiente
+
+# Espejo de _paso_hacia(): un paso en la dirección contraria a la
+# amenaza, en vez de hacia ella. Para el apagaluces huyendo. A
+# diferencia de _paso_hacia() (que siempre camina hacia un buzo, y
+# por tanto nunca puede salirse del mapa), alejarse sí puede empujar
+# hacia el borde — de ahí la comprobación de límites que aquí hace
+# falta y allí no.
+func _paso_lejos_de(origen_celda: Vector2i, amenaza: Vector2i) -> Vector2i:
+	var dx := 0
+	var dy := 0
+	if amenaza.x > origen_celda.x:
+		dx = -1
+	elif amenaza.x < origen_celda.x:
+		dx = 1
+	if amenaza.y > origen_celda.y:
+		dy = -1
+	elif amenaza.y < origen_celda.y:
+		dy = 1
+	var siguiente := origen_celda + Vector2i(dx, dy)
+	if not _celda_valida(siguiente):
+		return origen_celda
 	if _es_pared(siguiente):
 		return origen_celda
 	if _celda_ocupada_por_buzo(siguiente) >= 0:
@@ -326,6 +365,8 @@ func _turno_enemigo() -> void:
 				_decidir_mele(e, objetivo)
 			"distancia":
 				_decidir_distancia(e, objetivo)
+			"apagaluces":
+				_decidir_apagaluces(e, objetivo)
 
 	# El mar cobra por turno, no solo por moverse: cada buzo vivo gasta
 	# 1 de oxígeno al cerrar la ronda, se haya movido o no. Sin esto,
@@ -344,6 +385,17 @@ func _turno_enemigo() -> void:
 			vidas_buzos[i] = maxi(vidas_buzos[i] - DANO_ASFIXIA, 0)
 			if vidas_buzos[i] <= 0:
 				_aplicar_muerte_buzo(i)
+
+	# El apagaluces no hace daño: dejó a un buzo sin luz por un número
+	# de rondas (turnos_sin_luz_buzos). Aquí se cumple la cuenta atrás
+	# y, al llegar a 0, se le devuelve su radio de luz normal.
+	for i in 4:
+		if not buzos_vivos[i]:
+			continue
+		if turnos_sin_luz_buzos[i] > 0:
+			turnos_sin_luz_buzos[i] -= 1
+			if turnos_sin_luz_buzos[i] == 0:
+				radios_luz_buzos[i] = RADIO_LUZ
 
 	# Recarga puntos de todos los buzos
 	for i in 4:
@@ -421,6 +473,29 @@ func _buzo_disparable(desde: Vector2i, alcance: int) -> int:
 			dist_min = d
 			objetivo = b
 	return objetivo
+
+# Comportamiento del apagaluces: golpea y se retira, cada vez que
+# puede. Si está a su alcance, ataca — deja al buzo sin luz
+# (turnos_ceguera de la ficha, 0 de daño: DISEÑO §5 es explícito en
+# que no hace daño directo) — y en la MISMA ronda da un paso
+# alejándose (_paso_lejos_de en vez de _paso_hacia). Si el paso de
+# retirada fuera a la ronda siguiente, se quedaría plantado justo
+# donde acaba de atacar y el buzo cegado lo tendría a tiro para
+# rematarlo gratis. Un solo paso no lo hace invulnerable, pero le da
+# opción de escapar en vez de regalar la revancha. No queda ninguna
+# marca permanente: a la ronda siguiente vuelve a comportarse con
+# normalidad y puede acercarse y golpear de nuevo — al mismo buzo o
+# a otro — tantas veces como el jugador se lo permita.
+func _decidir_apagaluces(idx_enemigo: int, objetivo: int) -> void:
+	var ficha: Dictionary = FichasCriaturas.FICHAS["apagaluces"]
+	var celda_enemigo: Vector2i = enemigos[idx_enemigo]["celda"]
+	var distancia := _distancia_celdas(celda_enemigo, celdas_buzos[objetivo])
+	if distancia <= ficha["alcance"]:
+		radios_luz_buzos[objetivo] = 0
+		turnos_sin_luz_buzos[objetivo] = int(ficha["turnos_ceguera"])
+		enemigos[idx_enemigo]["celda"] = _paso_lejos_de(celda_enemigo, celdas_buzos[objetivo])
+	else:
+		enemigos[idx_enemigo]["celda"] = _paso_hacia(celda_enemigo, celdas_buzos[objetivo])
 
 func _input(event: InputEvent) -> void:
 	var pos := Vector2.ZERO
@@ -546,7 +621,11 @@ func _draw() -> void:
 			centro_e + Vector2(0, r),
 			centro_e + Vector2(-r, 0),
 		])
-		var color_rombo := COLOR_ENEMIGO_DISTANCIA if enemigos[e]["tipo"] == "distancia" else COLOR_ENEMIGO
+		var colores_por_tipo := {
+			"distancia": COLOR_ENEMIGO_DISTANCIA,
+			"apagaluces": COLOR_ENEMIGO_APAGALUCES,
+		}
+		var color_rombo: Color = colores_por_tipo.get(enemigos[e]["tipo"], COLOR_ENEMIGO)
 		draw_colored_polygon(puntos_rombo, color_rombo)
 
 	# Dibujar los 4 buzos
@@ -554,6 +633,12 @@ func _draw() -> void:
 		if not buzos_vivos[i]:
 			continue
 		var centro := origen + (Vector2(celdas_buzos[i]) + Vector2(0.5, 0.5)) * lado
+		# Aro de ceguera: mismo principio que el de agonía, visible esté
+		# o no seleccionado el buzo. Reutiliza el color del apagaluces
+		# — el aro "firma" quién te lo hizo. Radio mayor que el de
+		# agonía para que, si algún día coinciden, se vean los dos.
+		if turnos_sin_luz_buzos[i] > 0:
+			draw_circle(centro, lado * 0.52, COLOR_ENEMIGO_APAGALUCES, false, 4.0)
 		# Aro de agonía: visible esté o no seleccionado el buzo. Sin esto,
 		# la única pista de que alguien se está ahogando eran los pips de
 		# vida del HUD, y esos solo muestran al buzo activo — invisible

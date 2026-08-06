@@ -8,7 +8,9 @@ class_name FichasCriaturas
 # Carril 2 de la metodología: provisional, se ajusta jugando.
 #
 #   vida:    puntos de vida al aparecer.
-#   dano:    daño que inflige cuando ataca a un buzo.
+#   dano:    daño que inflige cuando ataca a un buzo. 0 si su ataque
+#            no quita vida (el apagaluces no hace daño directo — su
+#            "dano" vive en un campo propio, turnos_ceguera).
 #   alcance: distancia (Chebyshev) a la que puede atacar sin moverse.
 #
 # El comportamiento (qué hace con ese alcance y ese daño) no vive
@@ -24,5 +26,11 @@ const FICHAS := {
 		"vida": 1,
 		"dano": 1,
 		"alcance": 4,
+	},
+	"apagaluces": {
+		"vida": 2,
+		"dano": 0,
+		"alcance": 1,
+		"turnos_ceguera": 3,
 	},
 }
