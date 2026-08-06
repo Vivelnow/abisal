@@ -9,6 +9,7 @@ const COLOR_PARED_GRIS := Color("1a2e3a")
 const COLOR_BUZO := Color("f2c14e")
 const COLOR_BUZO_ACTIVO := Color("ffffff")
 const COLOR_ENEMIGO := Color("c1382d")
+const COLOR_ENEMIGO_DISTANCIA := Color("e0793e")
 const COLOR_TOQUE := Color("4ecdc4")
 const COLOR_PIP_LLENO := Color("4ecdc4")
 const COLOR_PIP_VACIO := Color("1e4a66")
@@ -67,7 +68,7 @@ var celdas_vistas := [{}, {}, {}, {}]
 # Con esto, desalinearse ya no es posible: no hay tres listas que
 # alinear, hay una.
 var enemigos := [
-	{"celda": Vector2i(5, 1), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
+	{"celda": Vector2i(5, 1), "tipo": "distancia", "vida": FichasCriaturas.FICHAS["distancia"]["vida"], "vivo": true},
 	{"celda": Vector2i(6, 1), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
 	{"celda": Vector2i(5, 2), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
 	{"celda": Vector2i(6, 2), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
@@ -121,7 +122,7 @@ func _reiniciar() -> void:
 	oxigenos_buzos = [OXIGENO_MAX, OXIGENO_MAX, OXIGENO_MAX, OXIGENO_MAX]
 	celdas_vistas = [{}, {}, {}, {}]
 	enemigos = [
-		{"celda": Vector2i(5, 1), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
+		{"celda": Vector2i(5, 1), "tipo": "distancia", "vida": FichasCriaturas.FICHAS["distancia"]["vida"], "vivo": true},
 		{"celda": Vector2i(6, 1), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
 		{"celda": Vector2i(5, 2), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
 		{"celda": Vector2i(6, 2), "tipo": "mele", "vida": FichasCriaturas.FICHAS["mele"]["vida"], "vivo": true},
@@ -323,6 +324,8 @@ func _turno_enemigo() -> void:
 		match enemigos[e]["tipo"]:
 			"mele":
 				_decidir_mele(e, objetivo)
+			"distancia":
+				_decidir_distancia(e, objetivo)
 
 	# El mar cobra por turno, no solo por moverse: cada buzo vivo gasta
 	# 1 de oxígeno al cerrar la ronda, se haya movido o no. Sin esto,
@@ -374,6 +377,50 @@ func _decidir_mele(idx_enemigo: int, objetivo: int) -> void:
 			_aplicar_muerte_buzo(objetivo)
 	else:
 		enemigos[idx_enemigo]["celda"] = _paso_hacia(enemigos[idx_enemigo]["celda"], celdas_buzos[objetivo])
+
+# Comportamiento de la distancia: mismo esqueleto que el melé (ataca
+# si puede, si no avanza), pero con dos diferencias.
+# Primera: su alcance (4) es mayor que RADIO_LUZ (3), así que en
+# cuanto está a 4 de un buzo ya puede dispararle sin haber entrado
+# en su luz — el daño llega sin que el jugador vea de dónde, tal
+# como pide DISEÑO §5. Segunda, y es la que de verdad la distingue
+# del melé: "el buzo más cercano" (el objetivo que ya llega
+# calculado) no siempre es un tiro posible — puede estar detrás de
+# un muro. Por eso no dispara directamente al objetivo recibido:
+# busca entre TODOS los buzos vivos si hay alguno disparable de
+# verdad (a su alcance y con línea de visión real) y le dispara a
+# ese, aunque no sea el más cercano en línea recta. Si ninguno es
+# disparable, se acerca al más cercano igualmente — puede que solo
+# le falte un paso para tener tiro. No se le añade lógica de huida:
+# DISEÑO dice que cae rápido si llegas a ella, así que se queda y
+# dispara en cuanto puede.
+func _decidir_distancia(idx_enemigo: int, objetivo: int) -> void:
+	var ficha: Dictionary = FichasCriaturas.FICHAS["distancia"]
+	var celda_enemigo: Vector2i = enemigos[idx_enemigo]["celda"]
+	var objetivo_disparable := _buzo_disparable(celda_enemigo, int(ficha["alcance"]))
+	if objetivo_disparable >= 0:
+		vidas_buzos[objetivo_disparable] = maxi(vidas_buzos[objetivo_disparable] - int(ficha["dano"]), 0)
+		if vidas_buzos[objetivo_disparable] <= 0:
+			_aplicar_muerte_buzo(objetivo_disparable)
+	else:
+		enemigos[idx_enemigo]["celda"] = _paso_hacia(celda_enemigo, celdas_buzos[objetivo])
+
+# Busca, entre los buzos vivos, el más cercano al que SÍ se le puede
+# disparar de verdad: dentro de alcance Y con línea de visión real.
+# Distinto de _buzo_vivo_mas_cercano(), que ignora paredes — esa
+# sirve para saber hacia dónde caminar, esta para saber a quién se
+# puede herir. Devuelve -1 si ningún buzo vivo es disparable ahora.
+func _buzo_disparable(desde: Vector2i, alcance: int) -> int:
+	var objetivo := -1
+	var dist_min := 9999
+	for b in 4:
+		if not buzos_vivos[b]:
+			continue
+		var d := _distancia_celdas(desde, celdas_buzos[b])
+		if d <= alcance and d < dist_min and _tiene_vision(desde, celdas_buzos[b]):
+			dist_min = d
+			objetivo = b
+	return objetivo
 
 func _input(event: InputEvent) -> void:
 	var pos := Vector2.ZERO
@@ -499,7 +546,8 @@ func _draw() -> void:
 			centro_e + Vector2(0, r),
 			centro_e + Vector2(-r, 0),
 		])
-		draw_colored_polygon(puntos_rombo, COLOR_ENEMIGO)
+		var color_rombo := COLOR_ENEMIGO_DISTANCIA if enemigos[e]["tipo"] == "distancia" else COLOR_ENEMIGO
+		draw_colored_polygon(puntos_rombo, color_rombo)
 
 	# Dibujar los 4 buzos
 	for i in 4:
